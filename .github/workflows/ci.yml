@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+  code:
+    name: Verify código
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Verify código ran" && sleep 20
+
+  fichas:
+    name: Verify fichas
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Verify fichas ran" && sleep 20
+
+  cambios:
+    name: Qué cambió
+    runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.windows.outputs.corre }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: windows
+        name: ¿El PR toca los archivos del job de Windows?
+        env:
+          EVENTO: ${{ github.event_name }}
+        run: |
+          ARCHIVOS_WINDOWS="
+          .gitattributes
+          .github/workflows/ci.yml
+          package.json
+          package-lock.json
+          tsconfig.json
+          vitest.windows.config.ts
+          scripts/codex-metrics.mjs
+          scripts/despachador.mjs
+          scripts/evidencia.mjs
+          scripts/libreta.mjs
+          scripts/relevo-implementador.mjs
+          scripts/tablero.mjs
+          scripts/worktrees.mjs
+          tests/despachador.test.ts
+          tests/despachadorDespachable.test.ts
+          tests/despachadorHoras.test.ts
+          tests/helpers/repoGitTemporal.ts
+          tests/libreta.test.ts
+          tests/tablero.test.ts
+          "
+          if [ "$EVENTO" != "pull_request" ]; then
+            echo "No es un PR ($EVENTO): el job de Windows corre."
+            echo "corre=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git rev-parse -q --verify HEAD^2 >/dev/null; then
+            echo "Un PR sin commit de mezcla (no debería pasar): el job de Windows corre."
+            echo "corre=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tocados=$(git diff --name-only HEAD^1 HEAD | grep -Fx -f <(echo "$ARCHIVOS_WINDOWS" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d') || true)
+          if [ -n "$tocados" ]; then
+            echo "El PR toca: $tocados"
+            echo "corre=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "El PR no toca ningún archivo del job de Windows: se salta."
+            echo "corre=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  despachador-windows:
+    name: Despachador (Windows, donde de verdad corre)
+    needs: cambios
+    if: needs.cambios.outputs.windows == 'true'
+    runs-on: windows-latest
+    steps:
+      - run: echo "Windows job ran"
+
+  adversarial:
+    name: Suite adversarial cross-tenant (RLS)
+    concurrency:
+      group: ci-adversarial-supabase
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Suite adversarial cross-tenant (RLS) ran" && sleep 20
